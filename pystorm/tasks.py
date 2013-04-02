@@ -30,18 +30,9 @@ from .report import ProgressBar, parse_bytes
 from .state import ConnectionState
 from .fetch import provider_manager
 from .events import EventManager
-from .constant import BLOCK_SIZE
 
 from . import common
 from .nls import gettext as _
-
-# status type for status-changed signal
-TASK_START = 0
-TASK_PAUSE = 1
-TASK_STOP = 2
-TASK_RESUME = 3
-TASK_FINISH = 4
-TASK_ERROR = 5
 
 class StopExcetion(Exception):
     pass
@@ -53,6 +44,13 @@ class ResumeException(Exception):
     pass
 
 class TaskObject(EventManager):
+    # status type for status-changed signal
+    TASK_START = 0
+    TASK_PAUSE = 1
+    TASK_STOP = 2
+    TASK_RESUME = 3
+    TASK_FINISH = 4
+    TASK_ERROR = 5
     
     def __init__(self, url, output_file=None, num_connections=4, max_speed=None, verbose=False, output_temp=False):
         EventManager.__init__(self)
@@ -122,7 +120,7 @@ class TaskObject(EventManager):
     def resume(self):
         if self.task_thread is None:
             self.emit("resume", obj=self)
-            self.emit("status-changed", (TASK_RESUME, None), self)
+            self.emit("status-changed", (self.TASK_RESUME, None), self)
             self.start()
         
     def isfinish(self):    
@@ -139,14 +137,14 @@ class TaskObject(EventManager):
                 error_info = _("Don't support the protocol")
                 self.logerror(error_info)
                 self.emit("error", error_info, self)
-                self.emit("status-changed", (TASK_ERROR, error_info), self)
+                self.emit("status-changed", (self.TASK_ERROR, error_info), self)
                 return 
             
             if not self.output_file:
                 error_info = _("Invalid URL")
                 self.logerror(error_info)
                 self.emit("error", error_info, self)
-                self.emit("status-changed", (TASK_ERROR, error_info), self)
+                self.emit("status-changed", (self.TASK_ERROR, error_info), self)
                 return
             
             self.__stop = False
@@ -157,7 +155,7 @@ class TaskObject(EventManager):
                 error_info = _("Failed to get file information")
                 self.logerror("UEL: %s, %s", self.url, error_info)
                 self.emit("error", error_info, self)
-                self.emit("status-changed", (TASK_ERROR, error_info), self)
+                self.emit("status-changed", (self.TASK_ERROR, error_info), self)
                 return
             
             if self.output_temp:
@@ -166,7 +164,7 @@ class TaskObject(EventManager):
                 part_output_file = "%s.part" % self.output_file            
             
             self.emit("start", obj=self)
-            self.emit("status-changed", (TASK_START, None), self)
+            self.emit("status-changed", (self.TASK_START, None), self)
             
            # load ProgressBar.
             # if file_size < BLOCK_SIZE:
@@ -239,7 +237,7 @@ class TaskObject(EventManager):
             self.__finish = True
             self.emit_update()            
             self.emit("finish", obj=self)
-            self.emit("status-changed", (TASK_FINISH, None), self)
+            self.emit("status-changed", (self.TASK_FINISH, None), self)
             if self.verbose:    
                 self.report_bar.display_progress()    
             
@@ -255,23 +253,23 @@ class TaskObject(EventManager):
             except: pass
             
             self.emit("stop", obj=self)
-            self.emit("status-changed", (TASK_STOP, None), self)
+            self.emit("status-changed", (self.TASK_STOP, None), self)
             
         except PauseException:    
             self.stop_all_task()
             self.emit("pause", obj=self)
-            self.emit("status-changed", (TASK_PAUSE, None), self)
+            self.emit("status-changed", (self.TASK_PAUSE, None), self)
             
         except KeyboardInterrupt, e:    
             self.emit("stop", obj=self)
-            self.emit("status-changed", (TASK_STOP, None), self)
+            self.emit("status-changed", (self.TASK_STOP, None), self)
             self.stop_all_task()
             
         except Exception, e:    
             self.emit("error", _("Unknown error"))
-            self.emit("status-changed", (TASK_ERROR, _("Unknown error")), self)
+            self.emit("status-changed", (self.TASK_ERROR, _("Unknown error")), self)
             self.emit("stop", obj=self)
-            self.emit("status-changed", (TASK_STOP, None), self)
+            self.emit("status-changed", (self.TASK_STOP, None), self)
             traceback.print_exc(file=sys.stdout)
             self.logdebug("File: %s at dowloading error %s", self.output_file, e)
             self.stop_all_task()
