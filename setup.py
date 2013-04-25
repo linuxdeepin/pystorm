@@ -36,4 +36,3 @@ setup(
     po_directory = "po",
     po_package   = "pystorm",
     packages    = ['pystorm'])
-
