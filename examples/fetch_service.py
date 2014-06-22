@@ -22,21 +22,22 @@
 
 import sys
 from pystorm.services import FetchService
-from pystorm.tasks import TaskObject
+from pystorm.tasks import TaskObject, MultiTaskObject
 from pystorm.report import parse_bytes, parse_time
 
 # Start fetch services 
 fetch_service = FetchService(2)
 fetch_service.start()
 
-url_list = [
-    "http://packages.linuxdeepin.com/deepin/pool/main/d/deepin-emacs/deepin-emacs_1.1-3_all.deb", 
-    "http://packages.linuxdeepin.com/deepin/pool/main/d/deepinwine-qq2012/deepinwine-qq2012_0.0.1_i386.deb",
-    "http://packages.linuxdeepin.com/deepin/pool/main/d/deepinwine-qq2011/deepinwine-qq2011_0.0.1_i386.deb",
-    "http://packages.linuxdeepin.com/deepin/pool/main/d/deepinwine-qq2009/deepinwine-qq2009_0.0.2_all.deb"
-            ]
+urls = [
+        "http://packages.linuxdeepin.com/deepin/pool/main/d/deepinwine-qq2009/deepinwine-qq2009_0.0.3_all.deb",
+        "http://packages.linuxdeepin.com/deepin/pool/main/d/deepinwine-qq2011/deepinwine-qq2011_0.0.1_i386.deb",
+        "http://packages.linuxdeepin.com/deepin/pool/main/d/deepinwine-qq2012/deepinwine-qq2012_0.0.1_i386.deb",
+        ]
 
-task_list = [ TaskObject(url) for url in url_list]
+download_task = MultiTaskObject(urls)
+
+task_list = [download_task,]
 
 def update_state(task, data):
     progress = "%d%%" % data.progress
@@ -44,21 +45,20 @@ def update_state(task, data):
     remaining = parse_time(data.remaining)
     filesize = parse_bytes(data.filesize)
     downloaded = parse_bytes(data.downloaded)
-    
-    print "%s: %s/s - %s, progress: %s, total: %s, remaining time: %s" % (task.output_file, speed, 
+
+    sys.stdout.flush()
+    print "\r%s: %s/s - %s, progress: %s, total: %s, remaining time: %s" % (task, speed, 
                                                                           downloaded, progress, 
-                                                                          filesize, remaining)
-    print "-----------------------------------------------------------"
-    
+                                                                          filesize, remaining),
 
 for task in task_list:
     task.connect("update", update_state)
-    
-fetch_service.add_missions(task_list)    
+
+fetch_service.add_missions(task_list)
 
 while True:
     try:
         fetch_service.join(5.0)
-    except KeyboardInterrupt:    
+    except KeyboardInterrupt:
         sys.exit(0)
         raise SystemExit

@@ -43,7 +43,7 @@ class FetchService(threading.Thread):
         self.thread_sync_lock = threading.Lock()
         self.mission_lock = Queue.Queue()
                 
-    def run(self):    
+    def run(self):
         while True:
             result = self.mission_lock.get()
             self.start_missions(result)
@@ -83,7 +83,7 @@ class FetchService(threading.Thread):
             else:    
                 self.start_mission(mission)
             
-    def start_missions(self, missions):        
+    def start_missions(self, missions):
         for (index, mission) in enumerate(missions):
             # Add to wait list if active mission number reach max value.
             if len(self.active_mission_list) >= self.concurrent_thread_num:

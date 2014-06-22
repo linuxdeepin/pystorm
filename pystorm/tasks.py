@@ -46,11 +46,13 @@ class ResumeException(Exception):
 
 class TaskObject(EventManager):
     
-    def __init__(self, url, output_file=None, num_connections=4, max_speed=None, verbose=False, output_temp=False):
+    def __init__(self, url, output_file=None, num_connections=4, max_speed=None, verbose=False, output_temp=False, update_interval=1):
         EventManager.__init__(self)
+
         self.url = url
         self.output_file = self.get_output_file(output_file)
         self.num_connections = num_connections
+
         self.max_speed = max_speed
         self.conn_state = None
         self.fetch_threads = []
@@ -59,10 +61,11 @@ class TaskObject(EventManager):
         self.__finish = False
         self.verbose = verbose
         self.output_temp = output_temp
+        self.update_interval = update_interval
         self.update_object = common.Storage()
         self.task_thread = None
         
-        self.RemoteFetch = None        
+        self.RemoteFetch = None
         fetchs = provider_manager.get("fetch")
         
         for fetch in fetchs:        
@@ -137,6 +140,7 @@ class TaskObject(EventManager):
                 self.logerror(error_info)
                 self.emit("error", error_info, self)
                 return
+
             
             self.__stop = False
             self.__pause = False
@@ -147,15 +151,25 @@ class TaskObject(EventManager):
                 self.logerror("UEL: %s, %s", self.url, error_info)
                 self.emit("error", error_info, self)
                 return
-            
+
+            if os.path.exists(self.output_file):
+                self.update_object.speed = 0
+                self.update_object.progress = 100
+                self.update_object.remaining = 0
+                self.update_object.filesize = file_size
+                self.update_object.downloaded = file_size
+                self.emit("update", self.update_object, self)
+                self.emit("finish", obj=self)
+                return
+
             if self.output_temp:
                 part_output_file = common.get_temp_file(self.url)
-            else:    
-                part_output_file = "%s.part" % self.output_file            
+            else:
+                part_output_file = "%s.part" % self.output_file
             
             self.emit("start", obj=self)
             
-           # load ProgressBar.
+            # load ProgressBar.
             # if file_size < BLOCK_SIZE:
             #     num_connections = 1
             # else:    
@@ -212,10 +226,10 @@ class TaskObject(EventManager):
                 if self.verbose:        
                     self.report_bar.display_progress()        
                 self.emit_update()
-                time.sleep(1)        
+                time.sleep(self.update_interval)
                 
-            if self.verbose:    
-                self.report_bar.display_progress()    
+            if self.verbose:
+                self.report_bar.display_progress()
                 
             os.remove(state_file)    
             try:
@@ -224,7 +238,7 @@ class TaskObject(EventManager):
                 pass
             os.rename(part_output_file, self.output_file)
             self.__finish = True
-            self.emit_update()            
+            self.emit_update()
             self.emit("finish", obj=self)
             if self.verbose:    
                 self.report_bar.display_progress()    
@@ -256,3 +270,191 @@ class TaskObject(EventManager):
             traceback.print_exc(file=sys.stdout)
             self.logdebug("File: %s at dowloading error %s", self.output_file, e)
             self.stop_all_task()
+
+class MultiTaskObject(EventManager):
+    """
+        make multi task like one task
+    """
+    def __init__(self, urls, output_dir=None, num_connections=2, update_interval=1):
+        EventManager.__init__(self)
+
+        self.urls = urls
+        self.output_dir = output_dir
+        self.num_connections = num_connections
+        self.update_interval = update_interval
+
+        self.__stop = True
+        self.__pause = False
+        self.__finish = False
+        self.task_thread = None
+        self.start_time = None
+
+        self.update_object = common.Storage()
+        self.__downloaded_size = 0
+
+        self.total_size = 0
+        self.active_task_list = []
+        self.wait_task_list = []
+        self.all_task_list = []
+        self.task_finish_list = []
+        self.init_tasks()
+
+    def init_tasks(self):
+        for url in self.urls:
+            task = TaskObject(url, update_interval=0.2)
+            task.connect("update", self.update_tasks)
+            task.connect("pause", self.pause_tasks)
+            task.connect("stop", self.stop_tasks)
+            task.connect("finish", self.finish_tasks)
+            task.connect("resume", self.resume_tasks)
+            task.connect("error", self.emit_error)
+            self.all_task_list.append(task)
+
+    def stop_all_task(self):
+        for task in self.all_task_list:
+            task.stop()
+
+    def is_actived(self):
+        return len(self.task_finish_list) != len(self.urls)
+
+    def update_tasks(self, task, data):
+        pass
+
+    def pause_tasks(self, task, data):
+        pass
+
+    def stop_tasks(self, task, data):
+        pass
+
+    def finish_tasks(self, task, data):
+        if task in self.active_task_list:
+            self.active_task_list.remove(task)
+            self.task_finish_list.append(task)
+        self.__downloaded_size = 0
+        self.wake_up_wait_tasks()
+
+    def wake_up_wait_tasks(self):
+        for task in self.wait_task_list:
+            # Just break loop when active task is bigger than max value.
+            if len(self.active_task_list) >= self.num_connections:
+                break
+            # Otherwise add task from wait list.
+            else:
+                # Remove from wait list.
+                if task in self.wait_task_list:
+                    self.wait_task_list.remove(task)
+                self.active_task_list.append(task)
+                task.start()
+
+    def resume_tasks(self, task, data):
+        pass
+
+    def emit_error(self, task, error_info):
+        self.logerror(error_info)
+        self.emit("error", error_info)
+        self.__stop = True
+        self.task_thread = None
+
+    def emit_update(self):
+        dl_len = 0
+        for task in self.all_task_list:
+            if task.update_object:
+                dl_len += task.update_object.downloaded
+        now = time.time()
+        if self.__downloaded_size == 0:
+            self.start_time = time.time()
+            self.__downloaded_size = dl_len
+        elapsed_time = now - self.start_time
+
+        try:
+            avg_speed = (dl_len - self.__downloaded_size) / elapsed_time
+        except:
+            avg_speed = 0
+
+        #  TODO: speed
+        self.update_object.speed = avg_speed
+        self.update_object.progress = dl_len * 100 / self.total_size
+        self.update_object.remaining = (self.total_size - dl_len) / avg_speed if avg_speed > 0 else 0
+        self.update_object.filesize = self.total_size
+        self.update_object.downloaded = dl_len
+
+        self.emit("update", self.update_object, self)
+
+    def start(self):
+        self.task_thread = threading.Thread(target=self.run)
+        self.task_thread.setDaemon(True)
+        self.task_thread.start()
+
+    def run(self):
+        try:
+            self.emit("start", obj=self)
+            self.start_time = time.time()
+
+            for (index, task) in enumerate(self.all_task_list):
+                if task.RemoteFetch is None:
+                    error_info = _("Don't support the protocol")
+                    self.logerror(error_info)
+                    self.emit("error", error_info, task)
+                    return
+
+                if not task.output_file:
+                    error_info = _("Invalid URL")
+                    self.logerror(error_info)
+                    self.emit("error", error_info, task)
+                    return
+
+                file_size = task.RemoteFetch.get_file_size(task.url)
+                if file_size == 0:
+                    error_info = _("Failed to get file information")
+                    self.logerror("UEL: %s, %s", self.url, error_info)
+                    self.emit("error", error_info, task)
+                    return
+                else:
+                    self.total_size += file_size
+
+                if self.output_dir:
+                    task.output_file = os.path.join(self.output_dir, task.output_file)
+
+                if len(self.active_task_list) >= self.num_connections:
+                    self.wait_task_list += self.all_task_list[index:]
+                else:
+                    self.active_task_list.append(task)
+                    task.start()
+
+            self.__stop = False
+            self.__pause = False
+
+            while self.is_actived():
+                if self.__stop:
+                    raise StopExcetion
+
+                if self.__pause:
+                    raise PauseException
+
+                if len(self.active_task_list) >= self.num_connections:
+                    pass
+
+                self.emit_update()
+                time.sleep(self.update_interval)
+
+            self.emit_update()
+            self.emit("finish", obj=self)
+
+        except StopExcetion:
+            self.stop_all_task()
+            self.emit("stop", obj=self)
+
+        except PauseException:
+            self.stop_all_task()
+            self.emit("pause", obj=self)
+
+        except KeyboardInterrupt, e:
+            self.emit("stop", obj=self)
+            self.stop_all_task()
+
+        except Exception, e:
+            self.stop_all_task()
+            self.emit("error", _("Unknown error"))
+            self.emit("stop", obj=self)
+            self.logerror("MultiTask: %s at dowloading error %s", self.urls, e)
+            traceback.print_exc(file=sys.stdout)

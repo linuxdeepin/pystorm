@@ -23,7 +23,9 @@
 import logging
 import re
 
-levelno = logging.DEBUG
+#levelno = logging.DEBUG
+levelno = logging.INFO
+
 def setLevelNo(n):
     global levelno
     levelno = ( 100 - (n * 10) )
